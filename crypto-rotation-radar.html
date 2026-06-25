@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>加密市場雷達 · Market Radar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --void:#05080F;
+    --ink:#E8EEF8;
+    --ghost:#93A2B8;
+    --ghost-2:#BFCADD;
+    --line:rgba(120,140,175,.16);
+    --line-2:rgba(140,165,205,.32);
+    --cyan:#6FE0D2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:"Noto Sans TC",system-ui,sans-serif;
+    background:var(--void);color:var(--ink);
+    min-height:100vh;overflow-x:hidden;position:relative;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ambient wash, tinted live by sentiment */
+  #wash{position:fixed;inset:0;z-index:0;pointer-events:none;transition:background 1.2s ease;
+    background:radial-gradient(900px 700px at 50% 42%, rgba(60,90,140,.16), transparent 62%)}
+  #grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;mix-blend-mode:screen;
+    background-image:radial-gradient(rgba(255,255,255,.022) 1px, transparent 1px);background-size:3px 3px}
+  #scene{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;display:block;touch-action:none}
+  #labels{position:fixed;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+  .plabel{position:absolute;transform:translate(-50%,0);white-space:nowrap;
+    font-family:"Noto Sans TC",sans-serif;font-size:10.5px;font-weight:400;letter-spacing:.05em;
+    color:var(--ghost-2);text-shadow:0 1px 7px rgba(0,0,0,.85);
+    transition:color .2s ease;will-change:left,top,opacity}
+  .plabel.on{color:#fff;font-weight:600}
+
+  /* ---- top HUD ---- */
+  .hud{position:fixed;z-index:5;top:0;left:0;right:0;display:flex;align-items:center;
+    justify-content:space-between;gap:14px;padding:22px 28px;pointer-events:none}
+  .hud > *{pointer-events:auto}
+  .brand{display:flex;align-items:center;gap:13px}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 12px var(--cyan);animation:beat 2.6s infinite}
+  @keyframes beat{0%,100%{opacity:.45;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}
+  .brand h1{font-family:"Space Grotesk",sans-serif;font-size:14px;font-weight:600;letter-spacing:.16em;text-transform:uppercase}
+  .brand span{display:block;font-size:10.5px;color:var(--ghost);letter-spacing:.06em;margin-top:3px;font-weight:300}
+  .status{display:flex;align-items:center;gap:16px;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ghost)}
+  .status b{color:var(--ghost-2);font-weight:500}
+  .btn{appearance:none;background:rgba(18,26,42,.5);border:1px solid var(--line-2);color:var(--ghost-2);
+    font-family:"JetBrains Mono",monospace;font-size:11px;padding:8px 13px;border-radius:10px;cursor:pointer;
+    transition:.25s;letter-spacing:.04em;backdrop-filter:blur(8px)}
+  .btn:hover{border-color:var(--cyan);color:var(--ink)}
+  .btn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+  /* ---- bottom sentiment readout ---- */
+  .readout{position:fixed;z-index:5;left:0;right:0;bottom:104px;text-align:center;pointer-events:none;
+    padding:0 24px}
+  .readout .eyebrow{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.44em;
+    text-transform:uppercase;color:var(--ghost);margin-bottom:12px}
+  .readout .row{display:flex;align-items:baseline;justify-content:center;gap:16px;flex-wrap:wrap}
+  .readout .val{font-family:"Space Grotesk",sans-serif;font-size:clamp(46px,9vw,76px);font-weight:600;
+    line-height:.9;letter-spacing:-.02em;transition:color 1s ease;font-variant-numeric:tabular-nums}
+  .readout .cls{font-family:"Space Grotesk",sans-serif;font-size:clamp(17px,3.5vw,24px);font-weight:500;
+    letter-spacing:.04em;transition:color 1s ease}
+  .readout .note{margin-top:14px;font-size:12.5px;font-weight:300;color:var(--ghost-2);max-width:430px;
+    margin-left:auto;margin-right:auto;line-height:1.7;min-height:1.7em}
+
+  /* ---- metric strip ---- */
+  .strip{position:fixed;z-index:5;left:0;right:0;bottom:46px;display:flex;justify-content:center;
+    gap:7px;flex-wrap:wrap;padding:0 18px}
+  .chip{display:flex;flex-direction:column;gap:3px;padding:8px 13px;border-radius:11px;cursor:pointer;
+    background:rgba(16,23,38,.42);border:1px solid var(--line);backdrop-filter:blur(10px);
+    transition:.22s;min-width:96px}
+  .chip:hover,.chip.on{border-color:var(--cyan);background:rgba(22,32,52,.6);transform:translateY(-2px)}
+  .chip .cl{font-size:10px;color:var(--ghost);letter-spacing:.02em;white-space:nowrap}
+  .chip .cv{font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap}
+  .chip:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+  /* ---- hover hint ---- */
+  .hint{position:fixed;z-index:5;left:0;right:0;bottom:22px;text-align:center;
+    font-size:11px;color:var(--ghost);letter-spacing:.04em;font-weight:300;pointer-events:none;transition:.4s}
+
+  /* ---- data tooltip ---- */
+  #tip{position:fixed;z-index:8;pointer-events:none;opacity:0;transform:translate(-50%,-118%) scale(.96);
+    transition:opacity .18s ease,transform .18s ease;min-width:172px;max-width:240px;
+    background:rgba(12,18,30,.82);border:1px solid var(--line-2);border-radius:14px;padding:14px 16px;
+    backdrop-filter:blur(16px);box-shadow:0 24px 50px -24px rgba(0,0,0,.9)}
+  #tip.show{opacity:1;transform:translate(-50%,-128%) scale(1)}
+  #tip .t-k{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ghost);letter-spacing:.03em}
+  #tip .t-k i{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 9px var(--cyan)}
+  #tip .t-v{font-family:"JetBrains Mono",monospace;font-size:23px;font-weight:600;margin-top:8px;line-height:1;letter-spacing:-.02em}
+  #tip .t-s{margin-top:8px;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ghost-2)}
+  .up{color:#5BE5B0} .down{color:#FF7A8A}
+
+  /* ---- legal ---- */
+  .legal{position:fixed;z-index:5;left:0;right:0;bottom:6px;text-align:center;
+    font-size:9.5px;color:rgba(140,155,180,.55);letter-spacing:.02em;font-weight:300;padding:0 20px;line-height:1.5}
+
+  @media (max-width:720px){
+    .readout{bottom:150px}
+    .strip{bottom:78px;gap:6px}
+    .chip{min-width:0;padding:7px 10px}
+    .chip .cl{font-size:9px}.chip .cv{font-size:11.5px}
+    .hint{bottom:54px}
+    .legal{bottom:30px;font-size:9px}
+    .status .upd{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .pulse{animation:none}
+  }
+</style>
+</head>
+<body>
+<div id="wash"></div>
+<div id="grain"></div>
+<canvas id="scene"></canvas>
+<div id="labels"></div>
+
+<div class="hud">
+  <div class="brand">
+    <div class="pulse" id="pulse"></div>
+    <div>
+      <h1>加密市場雷達</h1>
+      <span>Crypto Market Radar · 即時行情與市場情緒</span>
+    </div>
+  </div>
+  <div class="status">
+    <div class="upd">更新 <b id="updated">—</b></div>
+    <button class="btn" id="refresh" aria-label="重新整理數據">↻ 更新</button>
+  </div>
+</div>
+
+<div class="readout">
+  <div class="eyebrow">市場情緒指數 · Fear &amp; Greed</div>
+  <div class="row">
+    <span class="val" id="fngVal">—</span>
+    <span class="cls" id="fngCls">讀取中</span>
+  </div>
+  <div class="note" id="fngNote">正在載入即時市場數據與情緒指標…</div>
+</div>
+
+<div class="strip" id="strip"></div>
+<div class="hint" id="hint">將游標移至光點即可檢視數據（觸控裝置可點按）· 灰色光點為尚未開放的指標</div>
+
+<div id="tip">
+  <div class="t-k"><i id="tipDot"></i><span id="tipLabel">—</span></div>
+  <div class="t-v" id="tipVal">—</div>
+  <div class="t-s" id="tipSub">—</div>
+</div>
+
+<div class="legal">
+  資料來源：CoinGecko、DefiLlama、Alternative.me（恐懼貪婪指數），皆為公開免費資料。本面板僅供市場觀測與研究參考，不構成投資建議；加密資產波動劇烈，請審慎評估自身風險。
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmtUSD=n=>'$'+Math.round(n).toLocaleString('en-US');
+const fmtBig=n=>{ if(n>=1e12)return '$'+(n/1e12).toFixed(2)+'T'; if(n>=1e9)return '$'+(n/1e9).toFixed(1)+'B'; if(n>=1e6)return '$'+(n/1e6).toFixed(1)+'M'; return '$'+Math.round(n).toLocaleString('en-US'); };
+const pct=v=>(v>=0?'+':'')+v.toFixed(2)+'%';
+
+/* ---- storage: Claude artifact (window.storage) → localStorage when self-hosted ---- */
+const _hasWS = (typeof window!=='undefined' && window.storage && typeof window.storage.get==='function');
+async function load(k,fb){
+  try{
+    if(_hasWS){ const r=await window.storage.get(k); return r?JSON.parse(r.value):fb; }
+    const r=localStorage.getItem(k); return r?JSON.parse(r):fb;
+  }catch(e){ return fb; }
+}
+async function save(k,v){
+  try{
+    if(_hasWS){ await window.storage.set(k,JSON.stringify(v)); }
+    else localStorage.setItem(k,JSON.stringify(v));
+  }catch(e){}
+}
+
+/* ---- data model ---- */
+const DATA={};   // key -> {value, sub, raw}
+const POINTS=[
+  {key:'btc',  label:'比特幣 BTC',  lat: 22, lon: 18},
+  {key:'eth',  label:'以太幣 ETH',  lat:-20, lon: 66},
+  {key:'mcap', label:'加密總市值',  lat: 44, lon:128},
+  {key:'vol',  label:'24H 成交量',  lat:-40, lon:178},
+  {key:'btcd', label:'BTC 主導率',  lat: 10, lon:222},
+  {key:'ethd', label:'ETH 主導率',  lat: 34, lon:286},
+  {key:'stab', label:'穩定幣供應',  lat:-14, lon:324},
+];
+POINTS.forEach(p=>DATA[p.key]={value:'—',sub:'資料載入中'});
+
+/* ---- Fear & Greed colour scale (恐懼→貪婪：紅 黃 綠 淺藍 深藍) ---- */
+const FNG_STOPS=[[0,0xFF4D4F],[25,0xF5C518],[50,0x35C75A],[75,0x56CCF2],[100,0x2D6BFF]];
+function fngColor(v){
+  v=Math.max(0,Math.min(100,v));
+  for(let i=0;i<FNG_STOPS.length-1;i++){
+    const [p0,c0]=FNG_STOPS[i],[p1,c1]=FNG_STOPS[i+1];
+    if(v<=p1){ const t=(v-p0)/(p1-p0); return new THREE.Color(c0).lerp(new THREE.Color(c1),t); }
+  }
+  return new THREE.Color(FNG_STOPS[FNG_STOPS.length-1][1]);
+}
+const fngClassTxt=v=> v<25?'極度恐懼': v<45?'恐懼': v<55?'中性': v<75?'貪婪':'極度貪婪';
+const fngNoteTxt=v=> v<25?'市場情緒低迷，常見於超賣階段，歷史上多為長線價值佈局區間。'
+  : v<45?'避險情緒升溫，資金趨於保守，短線波動可能加大。'
+  : v<55?'多空力道相對均衡，趨勢方向尚未明朗。'
+  : v<75?'風險偏好回升，資金流入風險資產，留意追漲節奏。'
+  :'市場情緒偏向過熱，需留意追高與回調風險。';
+let FNG=null;
+
+/* ===================== three.js scene ===================== */
+const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const canvas=$('scene');
+let renderer,scene,cam,globe,coreGrp,coreSolid,coreCage,coreCage2,ring1,ring2,coreOrbit,coreHalo,atmo;
+const coreMats=[];      // materials tinted by sentiment colour
+const R=2.45;
+const pts=[];           // {key,label,group,core,halo,labelEl,sx,sy,front}
+const ghosts=[];        // placeholder points (visual only)
+let hovered=-1, sticky=-1, paused=false, t=0;
+let cursorX=-999, cursorY=-999, hasCursor=false;
+const HIT_PX=34;        // hover radius in screen pixels
+const _v=new THREE.Vector3(), _c=new THREE.Vector3();
+
+function glowTexture(){
+  const c=document.createElement('canvas');c.width=c.height=128;
+  const g=c.getContext('2d');
+  const grd=g.createRadialGradient(64,64,0,64,64,64);
+  grd.addColorStop(0,'rgba(255,255,255,1)');
+  grd.addColorStop(.18,'rgba(255,255,255,.85)');
+  grd.addColorStop(.45,'rgba(255,255,255,.25)');
+  grd.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=grd;g.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+}
+const GLOW=null;
+function sph(latDeg,lonDeg,r){
+  const lat=latDeg*Math.PI/180, lon=lonDeg*Math.PI/180;
+  return new THREE.Vector3(r*Math.cos(lat)*Math.cos(lon), r*Math.sin(lat), r*Math.cos(lat)*Math.sin(lon));
+}
+
+function buildGlobe(){
+  globe=new THREE.Group();
+  scene.add(globe);
+  const tex=glowTexture();
+
+  // geodesic triangle shell (icosahedron wireframe — many triangles)
+  const triMat =new THREE.LineBasicMaterial({color:0x6FE0D2,transparent:true,opacity:.22});
+  const triMat2=new THREE.LineBasicMaterial({color:0x6FE0D2,transparent:true,opacity:.09});
+  const shell =new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(R,2)),triMat);
+  const shell2=new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(R*0.97,1)),triMat2);
+  globe.add(shell,shell2);
+
+  // surface sparkle dots
+  const N=620,pos=new Float32Array(N*3);
+  for(let i=0;i<N;i++){const u=Math.random(),v=Math.random();const th=2*Math.PI*u,ph=Math.acos(2*v-1);
+    pos[i*3]=R*Math.sin(ph)*Math.cos(th);pos[i*3+1]=R*Math.cos(ph);pos[i*3+2]=R*Math.sin(ph)*Math.sin(th);}
+  const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  globe.add(new THREE.Points(pg,new THREE.PointsMaterial({color:0x9FE6DC,size:.018,transparent:true,opacity:.5,
+    map:tex,blending:THREE.AdditiveBlending,depthWrite:false})));
+
+  // atmosphere halo behind globe (tinted by sentiment)
+  atmo=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x3a5a8c,transparent:true,opacity:.5,
+    blending:THREE.AdditiveBlending,depthWrite:false}));
+  atmo.scale.setScalar(R*4.2); scene.add(atmo);
+
+  // active data points (hoverable, named)
+  POINTS.forEach((p,i)=>{
+    const grp=new THREE.Group(); grp.position.copy(sph(p.lat,p.lon,R));
+    const core=new THREE.Mesh(new THREE.SphereGeometry(.05,16,16),
+      new THREE.MeshBasicMaterial({color:0xCFFcF4}));
+    const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x8FF0E2,transparent:true,opacity:.9,
+      blending:THREE.AdditiveBlending,depthWrite:false}));
+    halo.scale.setScalar(.5);
+    grp.add(core,halo); globe.add(grp);
+    const el=document.createElement('div'); el.className='plabel'; el.textContent=p.label;
+    el.style.opacity=0; $('labels').appendChild(el);
+    pts.push({...p,group:grp,core,halo,labelEl:el,sx:-99,sy:-99,front:false});
+  });
+
+  // placeholder points — future indicators (dim grey, not hoverable, unnamed)
+  const GHOSTS=[[-34,42],[52,98],[-6,150],[40,206],[-46,250],[18,332],[-24,288],[62,160]];
+  GHOSTS.forEach(([lat,lon],k)=>{
+    const grp=new THREE.Group(); grp.position.copy(sph(lat,lon,R));
+    const core=new THREE.Mesh(new THREE.SphereGeometry(.035,12,12),
+      new THREE.MeshBasicMaterial({color:0x6B7689,transparent:true,opacity:.8}));
+    const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x4A5567,transparent:true,opacity:.5,
+      blending:THREE.AdditiveBlending,depthWrite:false}));
+    halo.scale.setScalar(.32);
+    grp.add(core,halo); globe.add(grp);
+    ghosts.push({halo,ph:k*1.7});
+  });
+
+  // central reactor core — layered, high-tech
+  coreGrp=new THREE.Group(); scene.add(coreGrp);
+  const C=0x35C75A;
+  // solid faceted heart
+  coreSolid=new THREE.Mesh(new THREE.IcosahedronGeometry(.22,1),
+    new THREE.MeshBasicMaterial({color:C,transparent:true,opacity:.95}));
+  // bright edges of the heart
+  const solidEdge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(.225,1)),
+    new THREE.LineBasicMaterial({color:0xFFFFFF,transparent:true,opacity:.55}));
+  coreSolid.add(solidEdge);
+  // counter-rotating wireframe containment cage
+  coreCage=new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(.40,1)),
+    new THREE.LineBasicMaterial({color:C,transparent:true,opacity:.55}));
+  // faint outer dodecahedron shell
+  coreCage2=new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.DodecahedronGeometry(.56,0)),
+    new THREE.LineBasicMaterial({color:C,transparent:true,opacity:.22}));
+  // gyroscope rings (additive glow)
+  const ringMat=()=>new THREE.MeshBasicMaterial({color:C,transparent:true,opacity:.6,
+    blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});
+  ring1=new THREE.Mesh(new THREE.TorusGeometry(.64,.007,8,90),ringMat());
+  ring2=new THREE.Mesh(new THREE.TorusGeometry(.78,.006,8,90),ringMat());
+  ring1.rotation.set(Math.PI/2.3,0,.5);
+  ring2.rotation.set(.6,Math.PI/3,0);
+  // orbiting energy motes
+  const M=70,mp=new Float32Array(M*3);
+  for(let i=0;i<M;i++){const r=.5+Math.random()*.32,th=Math.random()*Math.PI*2,ph=Math.acos(2*Math.random()-1);
+    mp[i*3]=r*Math.sin(ph)*Math.cos(th);mp[i*3+1]=r*Math.cos(ph);mp[i*3+2]=r*Math.sin(ph)*Math.sin(th);}
+  const mg=new THREE.BufferGeometry();mg.setAttribute('position',new THREE.BufferAttribute(mp,3));
+  coreOrbit=new THREE.Points(mg,new THREE.PointsMaterial({color:0xFFFFFF,size:.022,map:tex,transparent:true,
+    opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false}));
+  coreGrp.add(coreCage2,coreCage,coreSolid,ring1,ring2,coreOrbit);
+
+  coreHalo=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:C,transparent:true,opacity:.8,
+    blending:THREE.AdditiveBlending,depthWrite:false}));
+  coreHalo.scale.setScalar(2.2); scene.add(coreHalo);
+
+  coreMats.push(coreSolid.material,coreCage.material,coreCage2.material,ring1.material,ring2.material);
+}
+
+function initScene(){
+  try{
+    renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    scene=new THREE.Scene();
+    cam=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,100);
+    cam.position.set(0,0,6.6);
+    buildGlobe(); resize();
+    addEventListener('resize',resize);
+    canvas.addEventListener('pointermove',onMove);
+    canvas.addEventListener('pointerleave',()=>{hasCursor=false;cursorX=cursorY=-999;});
+    canvas.addEventListener('pointerdown',onDown);
+    loop();
+  }catch(e){ canvas.style.display='none'; }
+}
+function resize(){
+  renderer.setSize(innerWidth,innerHeight,true);
+  cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  // shift the globe a touch above centre so it clears the bottom readout
+  const yoff = innerHeight<760 ? 0.9 : 0.55;
+  globe.position.y=yoff; if(coreGrp){coreGrp.position.y=yoff;coreHalo.position.y=yoff;atmo.position.y=yoff;}
+  const s = innerWidth<620?0.82:1; globe.scale.setScalar(s);
+  if(coreGrp){coreGrp.scale.setScalar(s);}
+}
+function onMove(e){ cursorX=e.clientX; cursorY=e.clientY; hasCursor=true; }
+function onDown(e){
+  cursorX=e.clientX; cursorY=e.clientY; hasCursor=true;
+  const i=findNearest(cursorX,cursorY);
+  sticky = (i>=0 && sticky===i) ? -1 : i;   // tap a point to pin; tap it again / elsewhere to release
+  syncChips();
+}
+/* nearest point within HIT_PX of (px,py) — works on any side of the globe; -1 if none */
+function findNearest(px,py){
+  let best=-1, bd=Infinity;
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i];
+    const dx=p.sx-px, dy=p.sy-py; let d=Math.sqrt(dx*dx+dy*dy);
+    if(d>HIT_PX) continue;
+    if(!p.front) d+=12;          // when front & back points overlap, prefer the front one
+    if(d<bd){ bd=d; best=i; }
+  }
+  return best;
+}
+function activeIdx(){ return sticky>=0?sticky : hovered; }
+
+function loop(){
+  requestAnimationFrame(loop);
+  t+=reduce?0.0006:0.0024;
+  paused = activeIdx()>=0;
+  if(!paused) globe.rotation.y+=reduce?0.0008:0.0022;
+  globe.rotation.x=Math.sin(t*0.4)*0.12;
+  globe.updateMatrixWorld(true);
+
+  // project every point to screen + flag front-facing + place its label
+  _c.set(0,globe.position.y,0);                       // globe centre in world space
+  const ai0=activeIdx();
+  const loff=innerWidth<620?15:19;
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i];
+    p.core.getWorldPosition(_v);
+    const nx=_v.x-_c.x, ny=_v.y-_c.y, nz=_v.z-_c.z;   // outward normal at point
+    const cx=cam.position.x-_v.x, cy=cam.position.y-_v.y, cz=cam.position.z-_v.z;
+    p.front = (nx*cx+ny*cy+nz*cz) > 0;                // normal faces the camera
+    _v.project(cam);
+    const behind=_v.z>1;
+    p.sx=(_v.x*0.5+0.5)*innerWidth; p.sy=(-_v.y*0.5+0.5)*innerHeight;
+    // label travels with the point and sits just below it
+    const el=p.labelEl;
+    if(behind){ el.style.opacity=0; }
+    else{
+      el.style.left=p.sx+'px'; el.style.top=(p.sy+loff)+'px';
+      el.style.opacity = (i===ai0)?1 : (p.front?0.82:0.30);
+      el.classList.toggle('on', i===ai0);
+    }
+  }
+  // hover updates every frame from the last cursor position → instant + pixel-precise
+  if(sticky<0) hovered = hasCursor ? findNearest(cursorX,cursorY) : -1;
+  canvas.style.cursor = (hasCursor && findNearest(cursorX,cursorY)>=0) ? 'pointer' : 'default';
+
+  const ai=activeIdx();
+  pts.forEach((p,i)=>{
+    const on=i===ai;
+    const pul=1+0.14*Math.sin(t*2.4+i*1.3);
+    p.halo.scale.setScalar((on?1.15:0.5)*pul);
+    p.halo.material.opacity=on?1:0.78;
+    p.core.scale.setScalar(on?1.9:1);
+  });
+
+  // dormant placeholder points twinkle faintly
+  for(const g of ghosts){
+    g.halo.material.opacity=0.34+0.13*Math.sin(t*1.2+g.ph);
+  }
+
+  if(coreGrp){
+    const s=innerWidth<620?0.82:1;
+    const beat=1+0.045*Math.sin(t*1.6);
+    coreGrp.scale.setScalar(beat*s);
+    coreSolid.rotation.y+=0.006; coreSolid.rotation.x+=0.003;
+    coreCage.rotation.y-=0.004; coreCage.rotation.z+=0.0025;   // counter-rotate cage
+    coreCage2.rotation.y+=0.0018; coreCage2.rotation.x-=0.0015;
+    ring1.rotation.z+=0.011; ring2.rotation.x+=0.009;          // gyroscope spin
+    coreOrbit.rotation.y-=0.003; coreOrbit.rotation.x+=0.002;
+    coreHalo.scale.setScalar(2.2+0.2*Math.sin(t*1.6));
+    coreHalo.material.opacity=0.68+0.12*Math.sin(t*1.6);
+  }
+
+  renderer.render(scene,cam);
+  updateTip(ai);
+}
+
+/* ---- tooltip ---- */
+const tip=$('tip');
+function updateTip(i){
+  if(i<0){ tip.classList.remove('show'); $('hint').style.opacity=1; return; }
+  $('hint').style.opacity=0;
+  const p=pts[i], d=DATA[p.key]||{};
+  tip.style.left=Math.max(110,Math.min(innerWidth-110,p.sx))+'px';
+  tip.style.top=Math.max(70,p.sy)+'px';
+  $('tipLabel').textContent=p.label;
+  $('tipVal').textContent=d.value??'—';
+  $('tipSub').innerHTML=d.sub??'';
+  tip.classList.add('show');
+}
+
+/* ===================== data ===================== */
+function setChip(key){
+  const el=document.querySelector(`.chip[data-k="${key}"] .cv`);
+  if(el) el.textContent=DATA[key].value;
+}
+function buildStrip(){
+  const s=$('strip'); s.innerHTML='';
+  POINTS.forEach((p,i)=>{
+    const c=document.createElement('button'); c.className='chip'; c.dataset.k=p.key; c.dataset.i=i;
+    c.innerHTML=`<span class="cl">${p.label}</span><span class="cv">${DATA[p.key].value}</span>`;
+    c.addEventListener('click',()=>{ sticky=(sticky===i?-1:i); syncChips(); });
+    s.appendChild(c);
+  });
+}
+function syncChips(){
+  document.querySelectorAll('.chip').forEach(c=>{
+    c.classList.toggle('on', +c.dataset.i===sticky);
+  });
+}
+
+async function fetchMarket(){
+  try{
+    const [g,p]=await Promise.all([
+      fetch('https://api.coingecko.com/api/v3/global').then(r=>r.json()),
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true').then(r=>r.json())
+    ]);
+    const b=p.bitcoin,e=p.ethereum,d=g.data;
+    DATA.btc ={value:fmtUSD(b.usd), sub:chgHTML('24H',b.usd_24h_change)};
+    DATA.eth ={value:fmtUSD(e.usd), sub:chgHTML('24H',e.usd_24h_change)};
+    DATA.mcap={value:fmtBig(d.total_market_cap.usd), sub:chgHTML('24H',d.market_cap_change_percentage_24h_usd)};
+    DATA.vol ={value:fmtBig(d.total_volume.usd), sub:'過去 24 小時'};
+    DATA.btcd={value:d.market_cap_percentage.btc.toFixed(1)+'%', sub:'占總市值比重'};
+    DATA.ethd={value:d.market_cap_percentage.eth.toFixed(1)+'%', sub:'占總市值比重'};
+    ['btc','eth','mcap','vol','btcd','ethd'].forEach(setChip);
+    $('updated').textContent=new Date().toLocaleTimeString('zh-Hant',{hour12:false});
+    save('snapshot',{DATA,FNG,ts:Date.now()});
+  }catch(e){ $('updated').textContent='行情連線失敗'; }
+}
+function chgHTML(tag,v){ if(v==null)return tag+' —'; const up=v>=0; return `${tag} <span class="${up?'up':'down'}">${pct(v)}</span>`; }
+
+async function fetchStable(){
+  try{
+    const r=await fetch('https://stablecoins.llama.fi/stablecoincharts/all');
+    const arr=await r.json();
+    const series=arr.map(x=>{const o=x.totalCirculatingUSD; return typeof o==='object'?(o.peggedUSD??Object.values(o).reduce((a,c)=>a+c,0)):o;}).filter(n=>typeof n==='number');
+    if(series.length<8) return;
+    const last=series[series.length-1], prev=series[series.length-8];
+    const ch=((last-prev)/prev)*100;
+    DATA.stab={value:fmtBig(last), sub:chgHTML('近7日',ch)};
+    setChip('stab'); save('snapshot',{DATA,FNG,ts:Date.now()});
+  }catch(e){}
+}
+
+async function fetchFNG(){
+  try{
+    const r=await fetch('https://api.alternative.me/fng/?limit=1');
+    const j=await r.json();
+    const v=parseInt(j.data[0].value,10); if(isNaN(v)) return;
+    FNG=v; applyFNG(v); save('snapshot',{DATA,FNG,ts:Date.now()});
+  }catch(e){
+    if(FNG==null){ $('fngCls').textContent='暫時無法取得'; $('fngNote').textContent='恐懼貪婪指數來源連線失敗，其餘行情數據不受影響。'; }
+  }
+}
+function applyFNG(v){
+  const col=fngColor(v), hex='#'+col.getHexString();
+  $('fngVal').textContent=v; $('fngVal').style.color=hex;
+  $('fngCls').textContent=fngClassTxt(v); $('fngCls').style.color=hex;
+  $('fngNote').textContent=fngNoteTxt(v);
+  $('pulse').style.background=hex; $('pulse').style.boxShadow='0 0 12px '+hex;
+  $('wash').style.background=`radial-gradient(900px 700px at 50% 42%, ${hex}28, transparent 62%)`;
+  if(coreGrp){
+    coreMats.forEach(m=>m.color=col.clone());
+    coreHalo.material.color=col.clone();
+    atmo.material.color=col.clone().multiplyScalar(.6);
+  }
+}
+
+/* ===================== boot ===================== */
+(async function(){
+  initScene();
+  buildStrip();
+  const snap=await load('snapshot',null);
+  if(snap){
+    Object.assign(DATA,snap.DATA||{});
+    POINTS.forEach(p=>setChip(p.key));
+    if(snap.FNG!=null){ FNG=snap.FNG; applyFNG(snap.FNG); }
+  }
+  function refreshAll(){ fetchMarket(); fetchStable(); fetchFNG(); }
+  refreshAll();
+  $('refresh').addEventListener('click',refreshAll);
+  setInterval(fetchMarket,60000);                       // market every 60s
+  setInterval(()=>{ fetchStable(); fetchFNG(); },300000); // slower ones every 5 min
+})();
+</script>
+</body>
+</html>
