@@ -145,7 +145,7 @@
 </div>
 
 <div class="strip" id="strip"></div>
-<div class="hint" id="hint">將游標移至光點即可檢視數據（觸控裝置可點按）· 灰色光點為尚未開放的指標</div>
+<div class="hint" id="hint">拖曳可旋轉球體（放開有慣性）· 移到光點檢視數據 · 灰點為尚未開放的指標</div>
 
 <div id="tip">
   <div class="t-k"><i id="tipDot"></i><span id="tipLabel">—</span></div>
@@ -221,6 +221,13 @@ let hovered=-1, sticky=-1, paused=false, t=0;
 let cursorX=-999, cursorY=-999, hasCursor=false;
 const HIT_PX=34;        // hover radius in screen pixels
 const _v=new THREE.Vector3(), _c=new THREE.Vector3();
+// drag-to-rotate + inertia physics
+let dragging=false, dragMoved=false, lastX=0, lastY=0, downX=0, downY=0;
+let velY=0, velX=0;                       // angular velocity (rad/frame)
+const DRAG_K=0.0062;                       // pointer px → radians
+const FRICTION=0.96;                       // inertia decay per frame
+const IDLE=reduce?0.0006:0.0017;           // gentle resting spin
+const PITCH_LIMIT=1.15;                    // clamp vertical tumble
 
 function glowTexture(){
   const c=document.createElement('canvas');c.width=c.height=128;
@@ -340,8 +347,10 @@ function initScene(){
     buildGlobe(); resize();
     addEventListener('resize',resize);
     canvas.addEventListener('pointermove',onMove);
-    canvas.addEventListener('pointerleave',()=>{hasCursor=false;cursorX=cursorY=-999;});
     canvas.addEventListener('pointerdown',onDown);
+    canvas.addEventListener('pointerup',onUp);
+    canvas.addEventListener('pointercancel',onUp);
+    canvas.addEventListener('pointerleave',()=>{ if(!dragging){hasCursor=false;cursorX=cursorY=-999;} });
     loop();
   }catch(e){ canvas.style.display='none'; }
 }
@@ -354,12 +363,35 @@ function resize(){
   const s = innerWidth<620?0.82:1; globe.scale.setScalar(s);
   if(coreGrp){coreGrp.scale.setScalar(s);}
 }
-function onMove(e){ cursorX=e.clientX; cursorY=e.clientY; hasCursor=true; }
-function onDown(e){
+function onMove(e){
   cursorX=e.clientX; cursorY=e.clientY; hasCursor=true;
-  const i=findNearest(cursorX,cursorY);
-  sticky = (i>=0 && sticky===i) ? -1 : i;   // tap a point to pin; tap it again / elsewhere to release
-  syncChips();
+  if(dragging){
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    if(Math.abs(e.clientX-downX)+Math.abs(e.clientY-downY) > 5) dragMoved=true;
+    globe.rotation.y += dx*DRAG_K;
+    globe.rotation.x = Math.max(-PITCH_LIMIT,Math.min(PITCH_LIMIT, globe.rotation.x + dy*DRAG_K));
+    velY = velY*0.35 + dx*DRAG_K*0.65;     // remember flick velocity
+    velX = velX*0.35 + dy*DRAG_K*0.65;
+  }
+}
+function onDown(e){
+  dragging=true; dragMoved=false;
+  downX=lastX=cursorX=e.clientX; downY=lastY=cursorY=e.clientY; hasCursor=true;
+  velY=0; velX=0;                          // grabbing the globe catches it (stops inertia)
+  try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
+}
+function onUp(e){
+  if(!dragging) return;
+  dragging=false;
+  try{ canvas.releasePointerCapture(e.pointerId); }catch(_){}
+  if(!dragMoved){                          // barely moved → treat as a tap on a point
+    const i=findNearest(e.clientX,e.clientY);
+    sticky = (i>=0 && sticky===i) ? -1 : i;
+    syncChips();
+  }
+  // if dragMoved, velX/velY carry the inertia
+  if(e.pointerType!=='mouse'){ hasCursor=false; cursorX=cursorY=-999; }  // touch has no lingering hover
 }
 /* nearest point within HIT_PX of (px,py) — works on any side of the globe; -1 if none */
 function findNearest(px,py){
@@ -378,9 +410,20 @@ function activeIdx(){ return sticky>=0?sticky : hovered; }
 function loop(){
   requestAnimationFrame(loop);
   t+=reduce?0.0006:0.0024;
-  paused = activeIdx()>=0;
-  if(!paused) globe.rotation.y+=reduce?0.0008:0.0022;
-  globe.rotation.x=Math.sin(t*0.4)*0.12;
+  paused = !dragging && activeIdx()>=0;     // hovering a point holds the globe
+
+  if(dragging){
+    // rotation already applied in onMove
+  } else if(paused){
+    // frozen while inspecting a point; velocity preserved
+  } else {
+    globe.rotation.y += velY;
+    globe.rotation.x += velX;
+    velY *= FRICTION; velX *= FRICTION;
+    if(Math.abs(velY) < IDLE) velY += (IDLE - velY)*0.05;   // settle into gentle idle spin
+    if(Math.abs(velX) < 0.0003) velX = 0;
+    globe.rotation.x = Math.max(-PITCH_LIMIT,Math.min(PITCH_LIMIT, globe.rotation.x));
+  }
   globe.updateMatrixWorld(true);
 
   // project every point to screen + flag front-facing + place its label
@@ -405,9 +448,10 @@ function loop(){
       el.classList.toggle('on', i===ai0);
     }
   }
-  // hover updates every frame from the last cursor position → instant + pixel-precise
-  if(sticky<0) hovered = hasCursor ? findNearest(cursorX,cursorY) : -1;
-  canvas.style.cursor = (hasCursor && findNearest(cursorX,cursorY)>=0) ? 'pointer' : 'default';
+  // hover updates every frame from the last cursor position → instant + pixel-precise (off while dragging)
+  if(sticky<0) hovered = (hasCursor && !dragging) ? findNearest(cursorX,cursorY) : -1;
+  canvas.style.cursor = dragging ? 'grabbing'
+    : ((hasCursor && findNearest(cursorX,cursorY)>=0) ? 'pointer' : 'grab');
 
   const ai=activeIdx();
   pts.forEach((p,i)=>{
